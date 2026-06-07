@@ -46,6 +46,12 @@ def compile_for(topology: str) -> tuple[str, str, str, str, str, str]:
 
 
 def main() -> None:
+    assert "pending" in app.render_metrics({}).lower()
+    fast_updates = app.update_mode("Fast Compile")
+    full_updates = app.update_mode("Full Control")
+    assert all(update.get("visible") is False for update in fast_updates)
+    assert all(update.get("visible") is True for update in full_updates)
+
     analysis = app.analyze_intake(BASE)
     topology = app.decide_topology(analysis, "Cascade")
     vital = app.extract_vital_structure(analysis, topology)
@@ -71,6 +77,7 @@ def main() -> None:
         assert "strategy | upside | risk | cost | selected" in prompt_text
         assert "No Chain Of Thought Leakage" in qa_text
         assert runtime.count("deterministic_fallback") >= 7
+        assert "| Stage | Source | Fallback reason | Duration ms |" in runtime
 
     print("ContextForge QA passed.")
 

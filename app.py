@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 
 APP_TITLE = "ContextForge"
-APP_SUBTITLE = "Agent Prompt Compiler"
+APP_SUBTITLE = "From fuzzy brief to build-ready agent blueprint."
 DEFAULT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 DEFAULT_MID_MODEL_ID = "RthItalia/nano_compact_3b_qkvfp16"
 DEFAULT_HIGH_MODEL_ID = "Qwen/Qwen3-32B"
@@ -93,8 +93,8 @@ class StageResult:
             "stage": stage,
             "source": self.source,
             "model_id": self.model_id,
-            "elapsed_ms": self.elapsed_ms,
-            "note": self.note,
+            "fallback_reason": self.note if self.source == "deterministic_fallback" else "",
+            "duration_ms": self.elapsed_ms,
         }
 
 
@@ -856,6 +856,12 @@ def compile_context(
 def render_metrics(metrics: dict[str, Any]) -> str:
     cards = []
     for label in ["Prompt Integrity", "Context Coverage", "Agent Readiness", "Risk Control"]:
+        if label not in metrics:
+            cards.append(
+                f'<div class="metric-card metric-pending"><span>{label}</span><strong>—</strong>'
+                '<div class="metric-track"><i style="width:0%"></i></div><small>pending</small></div>'
+            )
+            continue
         try:
             score = max(0, min(100, int(metrics.get(label, 0))))
         except (TypeError, ValueError):
@@ -886,14 +892,14 @@ def render_qa(checks: Any, repair_protocol: Any) -> str:
 
 def render_runtime(trace: list[dict[str, Any]]) -> str:
     lines = [
-        "| Stage | Source | Model | Time | Note |",
-        "|---|---|---|---:|---|",
+        "| Stage | Source | Fallback reason | Duration ms |",
+        "|---|---|---|---:|",
     ]
     for row in trace:
-        note = clean_text(row.get("note"), 240).replace("|", "/")
+        fallback_reason = clean_text(row.get("fallback_reason"), 240).replace("|", "/") or "—"
         lines.append(
-            f"| `{row.get('stage')}` | `{row.get('source')}` | `{row.get('model_id')}` | "
-            f"{row.get('elapsed_ms')} ms | {note} |"
+            f"| `{row.get('stage')}` | `{row.get('source')}` | {fallback_reason} | "
+            f"{row.get('duration_ms')} |"
         )
     fallback_stages = [row["stage"] for row in trace if row.get("source") == "deterministic_fallback"]
     lines.append(
@@ -901,6 +907,13 @@ def render_runtime(trace: list[dict[str, Any]]) -> str:
         + (", ".join(f"`{stage}`" for stage in fallback_stages) if fallback_stages else "None")
     )
     return "\n".join(lines)
+
+
+def update_mode(mode: str) -> tuple[Any, Any]:
+    import gradio as gr
+
+    show_full_control = mode == "Full Control"
+    return gr.update(visible=show_full_control), gr.update(visible=show_full_control)
 
 
 def load_example() -> tuple[Any, ...]:
@@ -938,15 +951,32 @@ def build_demo() -> Any:
 <section class="forge-hero">
   <div class="hero-kicker">Multi-call small-model pipeline</div>
   <h1>{APP_TITLE}</h1>
-  <p>{APP_SUBTITLE}. Turn messy software, app, and agent ideas into executable prompt architectures.</p>
+  <p class="hero-tagline">{APP_SUBTITLE}</p>
+  <p class="hero-description">ContextForge turns messy software, app, and agent ideas into executable prompt architectures.</p>
   <div class="hero-badges"><span>7 isolated calls</span><span>Stage-level fallback</span><span>Private reasoning</span><span>Compiler, not generator</span></div>
+</section>
+<section class="pipeline-strip" aria-label="ContextForge seven-stage pipeline">
+  <span>Intake</span><b>→</b><span>Topology</span><b>→</b><span>Vital Structure</span><b>→</b><span>Reasoning</span><b>→</b><span>Prompt Pack</span><b>→</b><span>QA Repair</span><b>→</b><span>Assembly</span>
 </section>
 """
         )
         with gr.Row(elem_classes=["forge-layout"]):
             with gr.Column(scale=1, elem_classes=["config-panel"]):
                 gr.HTML('<div class="panel-title">Compiler Input</div>')
-                project_idea = gr.Textbox(label="Project idea", lines=4, placeholder="Describe the rough idea to compile...")
+                mode = gr.Radio(
+                    ["Fast Compile", "Full Control"],
+                    value="Fast Compile",
+                    label="Compile mode",
+                    elem_classes=["mode-toggle"],
+                )
+                gr.HTML(
+                    '<p class="project-helper">Paste a rough app, agent or workflow idea. ContextForge compiles it into a staged prompt pack for Codex or another coding agent.</p>'
+                )
+                project_idea = gr.Textbox(
+                    label="Project idea",
+                    lines=4,
+                    placeholder="Example: I want to build a Gradio app that helps students prepare oral exams from a syllabus.",
+                )
                 with gr.Row():
                     target_user = gr.Textbox(label="Target user")
                     build_target = gr.Textbox(label="Build target")
@@ -954,26 +984,31 @@ def build_demo() -> Any:
                     topology_choice = gr.Dropdown(TOPOLOGIES, value="Auto", label="Topology")
                     risk_level = gr.Dropdown(["Low", "Medium", "High", "Critical"], value="Medium", label="Risk level")
                     output_language = gr.Textbox(value="English", label="Output language")
-                selected_layers = gr.CheckboxGroup(REASONING_LAYERS, value=["CRAFT", "Pareto 80/20", "Private CoT", "Self-Correction", "Sentinel Recovery"], label="Reasoning layers")
-                with gr.Accordion("Context inputs", open=False):
+                selected_layers = gr.CheckboxGroup(REASONING_LAYERS, value=["CRAFT", "Pareto 80/20", "Private CoT", "Self-Correction", "Sentinel Recovery"], label="Cognitive modules")
+                with gr.Accordion("Context inputs", open=False, visible=False) as context_inputs_accordion:
                     user_context = gr.Textbox(label="User context", lines=3)
                     project_context = gr.Textbox(label="Project context", lines=3)
                     technical_context = gr.Textbox(label="Technical context", lines=3)
                     constraints = gr.Textbox(label="Constraints", lines=3)
                     inputs_files = gr.Textbox(label="Inputs / files", lines=3)
-                with gr.Accordion("Contracts and controls", open=True):
+                with gr.Accordion("Contracts and controls", open=False, visible=False) as contracts_accordion:
                     output_contract = gr.Textbox(label="Output contract", lines=3)
                     failure_modes = gr.Textbox(label="Failure modes", lines=3)
                     verification_criteria = gr.Textbox(label="Verification criteria", lines=3)
                 with gr.Row():
-                    compile_button = gr.Button("Compile Architecture", variant="primary")
+                    compile_button = gr.Button("Compile Prompt Architecture", variant="primary")
                     example_button = gr.Button("Load Example", variant="secondary")
 
             with gr.Column(scale=1, elem_classes=["output-panel"]):
                 metrics = gr.HTML(value=render_metrics({}))
                 gr.HTML('<div class="panel-title">Compiled Output</div>')
                 with gr.Accordion("Prompt Pack", open=True):
-                    prompt_output = gr.Code(label="Copyable compiled prompt pack", language="markdown", lines=28)
+                    prompt_output = gr.Code(
+                        value="No architecture compiled yet. Fill the project idea and run Compile Prompt Architecture.",
+                        label="Copyable compiled prompt pack",
+                        language="markdown",
+                        lines=28,
+                    )
                 with gr.Accordion("Architecture Analysis", open=False):
                     architecture_output = gr.Markdown()
                 with gr.Accordion("Execution Plan", open=False):
@@ -1004,6 +1039,11 @@ def build_demo() -> Any:
             fn=compile_context,
             inputs=inputs,
             outputs=[metrics, architecture_output, prompt_output, execution_output, qa_output, runtime_output],
+        )
+        mode.change(
+            fn=update_mode,
+            inputs=[mode],
+            outputs=[context_inputs_accordion, contracts_accordion],
         )
         example_button.click(fn=load_example, inputs=[], outputs=inputs)
     return demo

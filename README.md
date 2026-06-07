@@ -19,6 +19,15 @@ ContextForge compiles messy software, app, and agent ideas into executable promp
 
 **Backup Gradio Space:** https://huggingface.co/spaces/RthItalia/ContextForge
 
+**Tagline:** From fuzzy brief to build-ready agent blueprint.
+
+## Backyard AI Fit
+
+- Built for real builders using AI coding agents.
+- Real problem: vague briefs make Codex and other agents produce wrong code, generic UI, or incomplete workflows.
+- Real use evidence: this architecture was used to coordinate Trollsona development, including UI refactor, model cascade, QA, packaging, and video automation.
+- Small-model fit: ContextForge decomposes a hard prompt-writing task into seven smaller calls so a small model can handle it.
+
 The backend always executes seven isolated modules sequentially:
 
 1. intake analysis

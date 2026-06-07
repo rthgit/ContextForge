@@ -70,6 +70,18 @@ body,
   max-width: 760px;
 }
 
+.forge-hero .hero-tagline {
+  color: var(--text);
+  font-size: 1.24rem;
+  font-weight: 750;
+  margin-bottom: 5px;
+}
+
+.forge-hero .hero-description {
+  color: #aab9c8;
+  font-size: 0.98rem;
+}
+
 .hero-badges {
   display: flex;
   flex-wrap: wrap;
@@ -84,6 +96,35 @@ body,
   color: #bdeef0;
   padding: 6px 10px;
   font-size: 0.8rem;
+}
+
+.pipeline-strip {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(13, 18, 27, 0.92);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  overflow-x: auto;
+  padding: 10px 12px;
+  scrollbar-width: thin;
+}
+
+.pipeline-strip span {
+  border: 1px solid rgba(90, 213, 217, 0.2);
+  border-radius: 999px;
+  background: rgba(90, 213, 217, 0.055);
+  color: #c8f1f2;
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 750;
+  padding: 6px 9px;
+}
+
+.pipeline-strip b {
+  color: var(--blue);
+  font-size: 0.78rem;
 }
 
 .forge-layout {
@@ -110,6 +151,21 @@ body,
 
 .panel-title {
   margin: 2px 0 12px;
+}
+
+.project-helper {
+  border-left: 2px solid var(--cyan);
+  color: #aec0d1;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  margin: 4px 0 10px;
+  padding-left: 10px;
+}
+
+.mode-toggle {
+  border: 1px solid rgba(90, 213, 217, 0.18) !important;
+  border-radius: 10px !important;
+  background: rgba(8, 13, 21, 0.55) !important;
 }
 
 .gradio-container .block,
@@ -181,6 +237,18 @@ body,
   display: block;
   font-size: 1.45rem;
   margin: 4px 0 7px;
+}
+
+.metric-card small {
+  color: var(--muted);
+  display: block;
+  font-size: 0.64rem;
+  margin-top: 5px;
+  text-transform: uppercase;
+}
+
+.metric-pending strong {
+  color: var(--muted);
 }
 
 .metric-track {
