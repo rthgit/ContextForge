@@ -204,6 +204,33 @@ body,
   border-color: rgba(90, 213, 217, 0.52) !important;
 }
 
+.config-panel label:has(input[type="checkbox"]) {
+  border: 1px solid rgba(129, 159, 190, 0.3) !important;
+  border-radius: 8px !important;
+  background: #101925 !important;
+  color: #c6d4e2 !important;
+}
+
+.config-panel label:has(input[type="checkbox"]) span {
+  color: #c6d4e2 !important;
+}
+
+.config-panel label:has(input[type="checkbox"]:checked) {
+  border-color: rgba(90, 213, 217, 0.62) !important;
+  background: rgba(42, 111, 151, 0.46) !important;
+}
+
+.config-panel label:has(input[type="checkbox"]:checked) span {
+  color: #ffffff !important;
+  font-weight: 750 !important;
+}
+
+.config-panel input[type="checkbox"] {
+  accent-color: var(--cyan) !important;
+  background: #08111b !important;
+  border-color: rgba(90, 213, 217, 0.52) !important;
+}
+
 .gradio-container .block,
 .gradio-container .form,
 .gradio-container .wrap,
@@ -304,6 +331,28 @@ body,
   font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace !important;
   font-size: 0.82rem !important;
   line-height: 1.55 !important;
+}
+
+.output-panel table code {
+  border: 0 !important;
+  background: transparent !important;
+  color: #bdeef0 !important;
+  padding: 0 !important;
+}
+
+.output-panel .prose code {
+  border: 1px solid rgba(90, 213, 217, 0.2) !important;
+  border-radius: 4px !important;
+  background: #101925 !important;
+  color: #bdeef0 !important;
+  padding: 1px 4px !important;
+}
+
+.output-panel table th,
+.output-panel table td {
+  border-color: rgba(129, 159, 190, 0.34) !important;
+  background: #0d141f !important;
+  color: var(--text) !important;
 }
 
 .gradio-container footer {

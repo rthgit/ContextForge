@@ -19,6 +19,8 @@ ContextForge compiles messy software, app, and agent ideas into executable promp
 
 **Backup Gradio Space:** https://huggingface.co/spaces/RthItalia/ContextForge
 
+**Demo video:** https://raw.githubusercontent.com/rthgit/ContextForge/main/artifacts/contextforge-demo.mp4
+
 **Tagline:** From fuzzy brief to build-ready agent blueprint.
 
 ## Backyard AI Fit
@@ -94,3 +96,9 @@ python app.py
 ```
 
 The QA script verifies all four topologies, independent stage execution, required tags, chain-of-thought safety, controlled Tree of Thought output, and stage-level fallback continuity.
+
+## Demo Assets
+
+- Demo video: `artifacts/contextforge-demo.mp4`
+- Recording guide: `artifacts/VIDEO_RECORDING_GUIDE.md`
+- Submission pack: `SUBMISSION.md`
