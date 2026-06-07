@@ -31,6 +31,8 @@ The backend always executes seven isolated modules sequentially:
 
 Every module attempts its own small-model call. If one call fails, only that stage uses a deterministic fallback and the pipeline continues. Runtime Details shows the source used by every stage.
 
+Each module also has a bounded token budget appropriate to its contract. `CONTEXTFORGE_MAX_NEW_TOKENS` is the global ceiling, while stage budgets keep the seven-call CPU path practical.
+
 ## Topologies
 
 - Single Prompt

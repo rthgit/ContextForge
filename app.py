@@ -46,6 +46,15 @@ STAGE_NAMES = [
     "qa_repair",
     "final_assembly",
 ]
+STAGE_TOKEN_BUDGETS = {
+    "intake_analysis": 180,
+    "topology_decision": 140,
+    "vital_structure": 180,
+    "reasoning_architecture": 240,
+    "prompt_pack_generation": 520,
+    "qa_repair": 260,
+    "final_assembly": 260,
+}
 
 
 def parse_bool_env(name: str, default: bool = False) -> bool:
@@ -237,7 +246,7 @@ def generate_json(stage: str, instruction: str, payload: dict[str, Any]) -> tupl
         with torch.no_grad():
             output_ids = model.generate(
                 **inputs,
-                max_new_tokens=MAX_NEW_TOKENS,
+                max_new_tokens=min(MAX_NEW_TOKENS, STAGE_TOKEN_BUDGETS.get(stage, MAX_NEW_TOKENS)),
                 do_sample=False,
                 repetition_penalty=1.05,
                 pad_token_id=tokenizer.eos_token_id,
