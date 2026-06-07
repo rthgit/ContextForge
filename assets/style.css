@@ -168,6 +168,42 @@ body,
   background: rgba(8, 13, 21, 0.55) !important;
 }
 
+.mode-toggle label,
+.mode-toggle .wrap,
+.mode-toggle .form,
+.mode-toggle [role="radiogroup"] {
+  background: transparent !important;
+}
+
+.mode-toggle label:has(input[type="radio"]) {
+  border: 1px solid rgba(129, 159, 190, 0.34) !important;
+  border-radius: 8px !important;
+  background: #101925 !important;
+  color: #c6d4e2 !important;
+  padding: 8px 12px !important;
+}
+
+.mode-toggle label:has(input[type="radio"]) span {
+  color: #c6d4e2 !important;
+}
+
+.mode-toggle label:has(input[type="radio"]:checked) {
+  border-color: rgba(90, 213, 217, 0.72) !important;
+  background: linear-gradient(135deg, rgba(42, 111, 151, 0.78), rgba(53, 73, 142, 0.84)) !important;
+  box-shadow: inset 0 0 0 1px rgba(90, 213, 217, 0.14) !important;
+}
+
+.mode-toggle label:has(input[type="radio"]:checked) span {
+  color: #ffffff !important;
+  font-weight: 800 !important;
+}
+
+.mode-toggle input[type="radio"] {
+  accent-color: var(--cyan) !important;
+  background: #08111b !important;
+  border-color: rgba(90, 213, 217, 0.52) !important;
+}
+
 .gradio-container .block,
 .gradio-container .form,
 .gradio-container .wrap,
