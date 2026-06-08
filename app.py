@@ -4,8 +4,10 @@ import json
 import os
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Callable
 
 
@@ -14,6 +16,8 @@ APP_SUBTITLE = "From fuzzy brief to build-ready agent blueprint."
 DEFAULT_MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
 DEFAULT_MID_MODEL_ID = "RthItalia/nano_compact_3b_qkvfp16"
 DEFAULT_HIGH_MODEL_ID = "Qwen/Qwen3-32B"
+DEFAULT_OPENBMB_MODEL_ID = "openbmb/MiniCPM5-1B"
+DEFAULT_OPENBMB_REASONING_MODEL_ID = "openbmb/MiniCPM4.1-8B"
 REQUIRED_PROMPT_TAGS = [
     "ROLE",
     "COGNITIVE_LAYERS",
@@ -76,8 +80,26 @@ MODEL_ENABLED = parse_bool_env("CONTEXTFORGE_ENABLE_MODEL", False)
 MODEL_ID = os.getenv("CONTEXTFORGE_MODEL_ID", DEFAULT_MODEL_ID)
 MID_MODEL_ID = os.getenv("CONTEXTFORGE_MID_MODEL_ID", DEFAULT_MID_MODEL_ID)
 HIGH_MODEL_ID = os.getenv("CONTEXTFORGE_HIGH_MODEL_ID", DEFAULT_HIGH_MODEL_ID)
+OPENBMB_ENABLED = parse_bool_env("CONTEXTFORGE_OPENBMB_ENABLE", False)
+OPENBMB_MODEL_ID = os.getenv("CONTEXTFORGE_OPENBMB_MODEL_ID", DEFAULT_OPENBMB_MODEL_ID)
+OPENBMB_REASONING_MODEL_ID = os.getenv(
+    "CONTEXTFORGE_OPENBMB_REASONING_MODEL_ID",
+    DEFAULT_OPENBMB_REASONING_MODEL_ID,
+)
 MAX_NEW_TOKENS = parse_int_env("CONTEXTFORGE_MAX_NEW_TOKENS", 1800, 256, 4096)
 MAX_INPUT_CHARS = parse_int_env("CONTEXTFORGE_MAX_INPUT_CHARS", 12000, 2000, 40000)
+
+
+@dataclass(frozen=True)
+class RuntimeCandidate:
+    role: str
+    model_id: str
+    source: str
+    requires_cuda: bool = False
+    prefer_cpu: bool = False
+    min_transformers: str = ""
+    min_cuda_gb: int = 0
+    disable_thinking: bool = False
 
 
 @dataclass
@@ -92,8 +114,8 @@ class StageResult:
         return {
             "stage": stage,
             "source": self.source,
-            "model_id": self.model_id,
-            "fallback_reason": self.note if self.source == "deterministic_fallback" else "",
+            "model_attempted": self.model_id,
+            "fallback_reason": self.note,
             "duration_ms": self.elapsed_ms,
         }
 
@@ -166,52 +188,234 @@ def merge_known(fallback: dict[str, Any], candidate: dict[str, Any] | None) -> d
     return merged
 
 
-def model_candidates() -> list[tuple[str, str, bool]]:
+def model_candidates() -> list[RuntimeCandidate]:
     candidates = [
-        ("high", HIGH_MODEL_ID, True),
-        ("mid", MID_MODEL_ID, True),
-        ("public_cpu", MODEL_ID, False),
+        RuntimeCandidate("high", HIGH_MODEL_ID, "small_model", requires_cuda=True),
+        RuntimeCandidate("mid", MID_MODEL_ID, "small_model", requires_cuda=True),
+        RuntimeCandidate("public_cpu", MODEL_ID, "small_model"),
     ]
     seen: set[str] = set()
     return [
         item
         for item in candidates
-        if item[1].strip() and not (item[1] in seen or seen.add(item[1]))
+        if item.model_id.strip() and not (item.model_id in seen or seen.add(item.model_id))
     ]
 
 
-@lru_cache(maxsize=1)
-def load_model() -> tuple[Any | None, Any | None, str, str]:
-    if not MODEL_ENABLED:
-        return None, None, "disabled", "model disabled by CONTEXTFORGE_ENABLE_MODEL"
+def openbmb_candidates() -> list[RuntimeCandidate]:
+    if not OPENBMB_ENABLED:
+        return []
+    candidates = [
+        RuntimeCandidate(
+            "openbmb_lightweight",
+            OPENBMB_MODEL_ID,
+            "openbmb_minicpm5",
+            prefer_cpu=True,
+            min_transformers="5.6",
+            disable_thinking=True,
+        ),
+        RuntimeCandidate(
+            "openbmb_reasoning",
+            OPENBMB_REASONING_MODEL_ID,
+            "openbmb_minicpm4_reasoning",
+            requires_cuda=True,
+            min_transformers="4.56",
+            min_cuda_gb=20,
+        ),
+    ]
+    seen: set[str] = set()
+    return [
+        item
+        for item in candidates
+        if item.model_id.strip() and not (item.model_id in seen or seen.add(item.model_id))
+    ]
+
+
+def runtime_candidates() -> list[RuntimeCandidate]:
+    candidates = openbmb_candidates()
+    if MODEL_ENABLED:
+        candidates.extend(model_candidates())
+    seen: set[str] = set()
+    return [
+        item
+        for item in candidates
+        if item.model_id not in seen and not seen.add(item.model_id)
+    ]
+
+
+def package_version_at_least(package: str, minimum: str) -> tuple[bool, str]:
+    try:
+        installed = version(package)
+    except PackageNotFoundError:
+        return False, f"{package} is not installed"
+    try:
+        from packaging.version import Version
+
+        compatible = Version(installed) >= Version(minimum)
+    except Exception:
+        compatible = installed >= minimum
+    return compatible, installed
+
+
+@lru_cache(maxsize=8)
+def load_candidate_model(candidate: RuntimeCandidate) -> tuple[Any | None, Any | None, str]:
     try:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except Exception as exc:
-        return None, None, "unavailable", f"dependencies unavailable: {type(exc).__name__}: {exc}"
+        return None, None, f"dependencies unavailable: {type(exc).__name__}: {exc}"
 
-    failures: list[str] = []
-    for role, candidate_id, requires_cuda in model_candidates():
-        if requires_cuda and not torch.cuda.is_available():
-            failures.append(f"{role}: CUDA unavailable")
-            continue
+    if candidate.min_transformers:
+        compatible, installed = package_version_at_least("transformers", candidate.min_transformers)
+        if not compatible:
+            return (
+                None,
+                None,
+                f"requires transformers>={candidate.min_transformers}; installed={installed}",
+            )
+    if candidate.requires_cuda and not torch.cuda.is_available():
+        return None, None, "CUDA unavailable"
+    if candidate.min_cuda_gb and torch.cuda.is_available():
         try:
-            tokenizer = AutoTokenizer.from_pretrained(candidate_id, trust_remote_code=True, use_fast=True)
-            if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
-                tokenizer.pad_token = tokenizer.eos_token
-            kwargs: dict[str, Any] = {"trust_remote_code": True, "low_cpu_mem_usage": True}
-            if torch.cuda.is_available():
-                kwargs["device_map"] = "cuda"
-                kwargs["torch_dtype"] = torch.float16
-            model = AutoModelForCausalLM.from_pretrained(candidate_id, **kwargs)
-            model.eval()
-            return tokenizer, model, candidate_id, f"selected {role}; " + "; ".join(failures)
+            total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         except Exception as exc:
-            failures.append(f"{role}: {type(exc).__name__}: {exc}")
-    return None, None, "unavailable", " | ".join(failures) or "no model candidates"
+            return None, None, f"could not inspect CUDA memory: {type(exc).__name__}: {exc}"
+        if total_gb < candidate.min_cuda_gb:
+            return None, None, f"requires at least {candidate.min_cuda_gb} GB CUDA memory; available={total_gb:.1f} GB"
+
+    try:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                candidate.model_id,
+                trust_remote_code=True,
+                use_fast=True,
+            )
+        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained(
+                candidate.model_id,
+                trust_remote_code=True,
+                use_fast=False,
+            )
+        if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:
+            tokenizer.pad_token = tokenizer.eos_token
+        kwargs: dict[str, Any] = {"trust_remote_code": True, "low_cpu_mem_usage": True}
+        use_cuda = torch.cuda.is_available() and not candidate.prefer_cpu
+        if use_cuda:
+            kwargs["device_map"] = "cuda"
+            kwargs["torch_dtype"] = torch.float16
+        model = AutoModelForCausalLM.from_pretrained(candidate.model_id, **kwargs)
+        model.eval()
+        device = "cuda" if use_cuda else "cpu"
+        return tokenizer, model, f"loaded {candidate.role} on {device}"
+    except Exception as exc:
+        return None, None, f"load failed: {type(exc).__name__}: {exc}"
 
 
-def format_chat_prompt(tokenizer: Any, stage: str, instruction: str, payload: dict[str, Any]) -> str:
+@lru_cache(maxsize=1)
+def load_model() -> tuple[Any | None, Any | None, str, str]:
+    candidates = runtime_candidates()
+    if not candidates:
+        return None, None, "disabled", "model runtimes disabled"
+    failures: list[str] = []
+    for candidate in candidates:
+        tokenizer, model, note = load_candidate_model(candidate)
+        if tokenizer is not None and model is not None:
+            return tokenizer, model, candidate.model_id, note
+        failures.append(f"{candidate.role} {candidate.model_id}: {note}")
+    return None, None, "unavailable", " | ".join(failures)
+
+
+def extract_output_language(payload: Any) -> str:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if key == "output_language" and clean_text(value, 40):
+                return clean_text(value, 40)
+        for value in payload.values():
+            language = extract_output_language(value)
+            if language:
+                return language
+    elif isinstance(payload, list):
+        for value in payload:
+            language = extract_output_language(value)
+            if language:
+                return language
+    return ""
+
+
+def detect_generation_issue(
+    raw_text: str,
+    stage: str,
+    output_language: str = "English",
+    generated_token_ids: list[int] | None = None,
+    special_token_ids: set[int] | None = None,
+    raw_with_special_tokens: str = "",
+) -> str | None:
+    text = raw_text or ""
+    stripped = text.strip()
+    if not text:
+        return "empty decoded continuation"
+    if not stripped:
+        return "whitespace-only continuation or immediate EOS after whitespace"
+
+    token_ids = generated_token_ids or []
+    specials = special_token_ids or set()
+    if token_ids and specials and len(token_ids) <= 2 and all(token_id in specials for token_id in token_ids):
+        return "immediate EOS or special-token-only continuation"
+
+    special_markers = re.findall(
+        r"<\|[^|]{1,80}\|>|</?(?:s|pad|eos|bos|unk)>",
+        raw_with_special_tokens or text,
+        flags=re.IGNORECASE,
+    )
+    if len(special_markers) >= 4:
+        most_common = max(special_markers.count(marker) for marker in set(special_markers))
+        if most_common >= 3:
+            return "repeated special tokens"
+
+    minimum_chars = {
+        "intake_analysis": 40,
+        "topology_decision": 35,
+        "vital_structure": 45,
+        "reasoning_architecture": 50,
+        "prompt_pack_generation": 100,
+        "qa_repair": 60,
+        "final_assembly": 80,
+    }.get(stage, 30)
+    if len(stripped) < minimum_chars:
+        return f"output too short for {stage} contract"
+    if "\ufffd" in stripped or re.search(r"(.)\1{9,}", stripped, flags=re.DOTALL):
+        return "suspicious replacement characters or repeated-character garbage"
+
+    printable_ratio = sum(character.isprintable() for character in stripped) / max(1, len(stripped))
+    if printable_ratio < 0.92:
+        return "suspicious non-printable output"
+    words = re.findall(r"[^\W\d_]{2,}", stripped, flags=re.UNICODE)
+    repeated_words = re.findall(
+        r"\b([^\W\d_]{2,})(?:\s+\1){5,}\b",
+        stripped,
+        flags=re.IGNORECASE | re.UNICODE,
+    )
+    if repeated_words:
+        return "repeated-token gibberish"
+
+    language = (output_language or "English").lower()
+    if "english" in language or "italian" in language or "italiano" in language:
+        alphabetic = [character for character in stripped if character.isalpha()]
+        latin = [character for character in alphabetic if "LATIN" in unicodedata.name(character, "")]
+        if alphabetic and len(latin) / len(alphabetic) < 0.65:
+            return f"suspicious non-target-language garbage for {output_language or 'English'}"
+        if len(words) < 3:
+            return f"insufficient {output_language or 'English'} language content"
+    return None
+
+
+def format_chat_prompt(
+    tokenizer: Any,
+    stage: str,
+    instruction: str,
+    payload: dict[str, Any],
+    disable_thinking: bool = False,
+) -> str:
     system = (
         "You are one isolated module inside ContextForge, an agent prompt compiler. "
         "Return only a valid JSON object. Private reasoning internal only. "
@@ -221,24 +425,40 @@ def format_chat_prompt(tokenizer: Any, stage: str, instruction: str, payload: di
     user = f"MODULE: {stage}\nTASK:\n{instruction}\nINPUT:\n{json_text(payload)}"
     try:
         if getattr(tokenizer, "chat_template", None):
+            kwargs: dict[str, Any] = {
+                "tokenize": False,
+                "add_generation_prompt": True,
+            }
+            if disable_thinking:
+                kwargs["enable_thinking"] = False
             return tokenizer.apply_chat_template(
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                tokenize=False,
-                add_generation_prompt=True,
+                **kwargs,
             )
     except Exception:
         pass
     return f"{system}\n\n{user}\n\nJSON:"
 
 
-def generate_json(stage: str, instruction: str, payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str, str]:
-    tokenizer, model, selected_id, load_note = load_model()
+def generate_with_candidate(
+    candidate: RuntimeCandidate,
+    stage: str,
+    instruction: str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str]:
+    tokenizer, model, load_note = load_candidate_model(candidate)
     if tokenizer is None or model is None:
-        return None, selected_id, load_note
+        return None, load_note
     try:
         import torch
 
-        prompt = format_chat_prompt(tokenizer, stage, instruction, payload)
+        prompt = format_chat_prompt(
+            tokenizer,
+            stage,
+            instruction,
+            payload,
+            disable_thinking=candidate.disable_thinking,
+        )
         inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=6144)
         device = getattr(model, "device", None)
         if device is not None and str(device) != "meta":
@@ -251,13 +471,56 @@ def generate_json(stage: str, instruction: str, payload: dict[str, Any]) -> tupl
                 repetition_penalty=1.05,
                 pad_token_id=tokenizer.eos_token_id,
             )
-        raw = tokenizer.decode(output_ids[0][inputs["input_ids"].shape[-1] :], skip_special_tokens=True)
+        continuation_ids = output_ids[0][inputs["input_ids"].shape[-1] :]
+        generated_token_ids = continuation_ids.detach().cpu().tolist()
+        raw = tokenizer.decode(continuation_ids, skip_special_tokens=True)
+        raw_with_special = tokenizer.decode(continuation_ids, skip_special_tokens=False)
+        special_token_ids = set(getattr(tokenizer, "all_special_ids", []) or [])
+        issue = detect_generation_issue(
+            raw,
+            stage,
+            extract_output_language(payload) or "English",
+            generated_token_ids,
+            special_token_ids,
+            raw_with_special,
+        )
+        if issue:
+            return None, f"{load_note}; rejected output: {issue}"
         parsed = parse_json_object(raw)
         if parsed is None:
-            return None, selected_id, f"{load_note}; invalid JSON output"
-        return parsed, selected_id, load_note
+            return None, f"{load_note}; invalid JSON output"
+        return parsed, load_note
     except Exception as exc:
-        return None, selected_id, f"{load_note}; generation failed: {type(exc).__name__}: {exc}"
+        return None, f"{load_note}; generation failed: {type(exc).__name__}: {exc}"
+
+
+def generate_json(
+    stage: str,
+    instruction: str,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str, str, str]:
+    candidates = runtime_candidates()
+    if not candidates:
+        reasons = []
+        if not OPENBMB_ENABLED:
+            reasons.append("OpenBMB mode disabled by CONTEXTFORGE_OPENBMB_ENABLE")
+        if not MODEL_ENABLED:
+            reasons.append("existing model path disabled by CONTEXTFORGE_ENABLE_MODEL")
+        return None, "none", "; ".join(reasons) or "no runtime candidates configured", "deterministic_fallback"
+
+    attempted: list[str] = []
+    failures: list[str] = []
+    for candidate in candidates:
+        attempted.append(candidate.model_id)
+        try:
+            parsed, note = generate_with_candidate(candidate, stage, instruction, payload)
+        except Exception as exc:
+            parsed = None
+            note = f"candidate execution failed: {type(exc).__name__}: {exc}"
+        if parsed is not None:
+            return parsed, " -> ".join(attempted), "; ".join(failures), candidate.source
+        failures.append(f"{candidate.role} {candidate.model_id}: {note}")
+    return None, " -> ".join(attempted), "; ".join(failures), "deterministic_fallback"
 
 
 def run_stage(
@@ -269,8 +532,7 @@ def run_stage(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     fallback = fallback_factory()
-    candidate, selected_id, note = generate_json(stage, instruction, payload)
-    source = "small_model"
+    candidate, selected_id, note, source = generate_json(stage, instruction, payload)
     if candidate is None:
         data = fallback
         source = "deterministic_fallback"
@@ -892,14 +1154,15 @@ def render_qa(checks: Any, repair_protocol: Any) -> str:
 
 def render_runtime(trace: list[dict[str, Any]]) -> str:
     lines = [
-        "| Stage | Source | Fallback reason | Duration ms |",
-        "|---|---|---|---:|",
+        "| Stage | Model attempted | Source | Fallback reason | Duration ms |",
+        "|---|---|---|---|---:|",
     ]
     for row in trace:
         fallback_reason = clean_text(row.get("fallback_reason"), 240).replace("|", "/") or "—"
+        model_attempted = clean_text(row.get("model_attempted"), 320).replace("|", "/") or "none"
         lines.append(
-            f"| `{row.get('stage')}` | `{row.get('source')}` | {fallback_reason} | "
-            f"{row.get('duration_ms')} |"
+            f"| `{row.get('stage')}` | `{model_attempted}` | `{row.get('source')}` | "
+            f"{fallback_reason} | {row.get('duration_ms')} |"
         )
     fallback_stages = [row["stage"] for row in trace if row.get("source") == "deterministic_fallback"]
     lines.append(

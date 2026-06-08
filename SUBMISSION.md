@@ -10,6 +10,7 @@
 | Backup Space | DONE | https://huggingface.co/spaces/RthItalia/ContextForge | None |
 | Gradio app | DONE | `app.py` defines the Blocks UI and seven-stage pipeline | None |
 | Small-model cascade | DONE | High/mid/public CPU candidates plus stage-level deterministic fallback | None |
+| OpenBMB / MiniCPM sponsor mode | DONE | Optional MiniCPM5-1B and CUDA-gated MiniCPM4.1-8B stage-level cascade | Enable `CONTEXTFORGE_OPENBMB_ENABLE=1` on a compatible runtime |
 | Seven isolated calls | DONE | Intake, topology, vital structure, reasoning, prompt pack, QA repair, assembly | None |
 | Fast Compile and Full Control | DONE | Public Space UI | None |
 | Stage-level runtime visibility | DONE | Runtime Details table | None |
@@ -29,6 +30,17 @@ Vague briefs make coding agents produce wrong code, generic UI, and incomplete w
 ## Small-Model Fit
 
 ContextForge decomposes a difficult prompt architecture task into seven smaller model calls. Each stage has a focused contract and its own fallback, allowing a small model to handle work that would be unreliable as one large generation.
+
+## OpenBMB Sponsor Mode
+
+ContextForge includes an optional OpenBMB runtime path:
+
+1. `openbmb/MiniCPM5-1B` as the preferred lightweight/local-first model
+2. `openbmb/MiniCPM4.1-8B` only when CUDA and sufficient memory are available
+3. existing ContextForge model cascade
+4. deterministic fallback for that stage only
+
+Blank, whitespace-only, immediate-EOS, repeated-special-token, suspicious-language, and contract-too-short outputs are rejected before they can enter the next stage.
 
 ## Real Use Evidence
 

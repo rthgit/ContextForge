@@ -70,6 +70,9 @@ CONTEXTFORGE_ENABLE_MODEL=1
 CONTEXTFORGE_MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct
 CONTEXTFORGE_MID_MODEL_ID=RthItalia/nano_compact_3b_qkvfp16
 CONTEXTFORGE_HIGH_MODEL_ID=Qwen/Qwen3-32B
+CONTEXTFORGE_OPENBMB_ENABLE=0
+CONTEXTFORGE_OPENBMB_MODEL_ID=openbmb/MiniCPM5-1B
+CONTEXTFORGE_OPENBMB_REASONING_MODEL_ID=openbmb/MiniCPM4.1-8B
 CONTEXTFORGE_MAX_NEW_TOKENS=1800
 ```
 
@@ -79,6 +82,35 @@ Runtime selection:
 2. compact mid model when CUDA is available
 3. Qwen 0.5B on public CPU Space
 4. deterministic stage-level fallback
+
+## OpenBMB / MiniCPM Mode
+
+ContextForge can optionally run with OpenBMB MiniCPM models as the text reasoning engine for its staged compiler.
+
+- [`openbmb/MiniCPM5-1B`](https://huggingface.co/openbmb/MiniCPM5-1B) is the preferred lightweight, local-first path. It is attempted first when OpenBMB mode is enabled.
+- [`openbmb/MiniCPM4.1-8B`](https://huggingface.co/openbmb/MiniCPM4.1-8B) is an optional stronger reasoning path. ContextForge attempts it only when CUDA and sufficient memory are available.
+- If a MiniCPM model is unavailable, incompatible, blank, too short, immediate-EOS, or gibberish, only that stage moves to the existing model cascade.
+- If all model paths fail, that stage uses its deterministic fallback and the final output still assembles.
+
+ContextForge is well suited to small models because it decomposes one hard prompt-engineering task into seven focused calls with explicit contracts.
+
+The default Space runtime remains unchanged. For an OpenBMB-compatible local environment, install the optional dependency set:
+
+```powershell
+pip install -r requirements-openbmb.txt
+```
+
+Then enable both OpenBMB and the existing fallback model path:
+
+```powershell
+$env:CONTEXTFORGE_OPENBMB_ENABLE='1'
+$env:CONTEXTFORGE_OPENBMB_MODEL_ID='openbmb/MiniCPM5-1B'
+$env:CONTEXTFORGE_OPENBMB_REASONING_MODEL_ID='openbmb/MiniCPM4.1-8B'
+$env:CONTEXTFORGE_ENABLE_MODEL='1'
+python app.py
+```
+
+Runtime Details reports `stage`, `model attempted`, `source`, `fallback reason`, and `duration ms`. These details remain outside the main Prompt Pack.
 
 For a fast local deterministic run:
 
